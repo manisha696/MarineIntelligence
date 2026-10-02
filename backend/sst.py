@@ -34,6 +34,10 @@ def get_sst(
 ):
     cache_key = get_cache_key(latitude, longitude, radius)
 
+    # ==========================================================
+    # CACHE
+    # ==========================================================
+
     cached = CACHE.get(cache_key)
 
     if cached:
@@ -45,17 +49,29 @@ def get_sst(
             result["cache_age_seconds"] = round(age)
             return result
 
+    # ==========================================================
+    # REGION
+    # ==========================================================
+
     lat_min = max(-89.99, latitude - radius)
     lat_max = min(89.99, latitude + radius)
 
     lon_min = max(-179.99, longitude - radius)
     lon_max = min(179.99, longitude + radius)
 
+    # ==========================================================
+    # NOAA ERDDAP QUERY
+    #
+    # IMPORTANT:
+    # Request a reduced grid instead of every available
+    # high-resolution pixel.
+    # ==========================================================
+
     query = (
         "sea_surface_temperature"
         "[last]"
-        f"[({lat_min}):({lat_max})]"
-        f"[({lon_min}):({lon_max})]"
+        f"[({lat_min}):4:({lat_max})]"
+        f"[({lon_min}):4:({lon_max})]"
     )
 
     url = (
@@ -68,12 +84,22 @@ def get_sst(
         "Accept": "application/json",
     }
 
+    # ==========================================================
+    # NOAA REQUEST
+    # ==========================================================
+
     try:
         response = requests.get(
             url,
             headers=headers,
-            timeout=90,
+            timeout=45,
             allow_redirects=True,
+        )
+
+    except requests.Timeout:
+        raise HTTPException(
+            status_code=504,
+            detail="NOAA SST request timed out.",
         )
 
     except requests.RequestException as exc:
@@ -81,6 +107,10 @@ def get_sst(
             status_code=502,
             detail=f"NOAA SST connection failed: {exc}",
         )
+
+    # ==========================================================
+    # NOAA RESPONSE
+    # ==========================================================
 
     if response.status_code == 429:
         raise HTTPException(
@@ -101,6 +131,10 @@ def get_sst(
             ),
         )
 
+    # ==========================================================
+    # JSON
+    # ==========================================================
+
     try:
         data = response.json()
 
@@ -114,6 +148,10 @@ def get_sst(
 
     columns = table.get("columnNames", [])
     rows = table.get("rows", [])
+
+    # ==========================================================
+    # NO DATA
+    # ==========================================================
 
     if not rows:
         result = {
@@ -134,6 +172,10 @@ def get_sst(
 
         return result
 
+    # ==========================================================
+    # PARSE POINTS
+    # ==========================================================
+
     points = []
 
     for row in rows:
@@ -149,6 +191,7 @@ def get_sst(
 
             sst_value = float(sst)
 
+            # Remove invalid physical values.
             if sst_value < -2 or sst_value > 40:
                 continue
 
@@ -160,6 +203,10 @@ def get_sst(
 
         except (ValueError, TypeError):
             continue
+
+    # ==========================================================
+    # NO VALID POINTS
+    # ==========================================================
 
     if not points:
         result = {
@@ -179,6 +226,10 @@ def get_sst(
         }
 
         return result
+
+    # ==========================================================
+    # RANGE
+    # ==========================================================
 
     values = [
         point["sst"]
@@ -201,6 +252,10 @@ def get_sst(
         },
         "points": points,
     }
+
+    # ==========================================================
+    # SAVE CACHE
+    # ==========================================================
 
     CACHE[cache_key] = {
         "timestamp": time.time(),
