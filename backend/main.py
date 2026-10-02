@@ -19,7 +19,7 @@ from fastapi import (
     Depends,
     HTTPException
 )
-
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import (
     HTTPBearer,
     HTTPAuthorizationCredentials
@@ -78,11 +78,18 @@ app = FastAPI(
     title="Marine Intelligence API",
     version="0.1.0"
 )
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 app.include_router(satellite_router)
 app.include_router(sst_router)
 app.include_router(pfz_router)
 app.include_router(risk_router)
-app.include_router(risk_router)
+
 if pfz_router is not None:
     app.include_router(pfz_router)
 # ==================================================
