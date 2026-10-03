@@ -18,7 +18,7 @@ router = APIRouter(
 CHLOROPHYLL_URL = (
     "https://coastwatch.noaa.gov/"
     "erddap/griddap/"
-    "noaacwNPPN20VIIRSchlociDaily.json"
+    "noaacwNPPN20S3ASCIDINEOFDaily.json"
 )
 
 SST_URL = (
@@ -181,11 +181,12 @@ def fetch_chlorophyll(
     lon_max = min(179.0, longitude + radius)
 
     query = (
-        "chlor_a"
-        "[last]"
-        f"[({lat_min}):({lat_max})]"
-        f"[({lon_min}):({lon_max})]"
-    )
+    "chlor_a"
+    "[last]"
+    "[0]"
+    f"[({lat_min}):({lat_max})]"
+    f"[({lon_min}):({lon_max})]"
+)
 
     url = (
         f"{CHLOROPHYLL_URL}?"
