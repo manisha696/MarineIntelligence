@@ -19,6 +19,19 @@ class LoginRequest(BaseModel):
 
 
 # ==================================================
+# OTP VERIFICATION
+# ==================================================
+
+class OTPRequest(BaseModel):
+    email: EmailStr
+
+
+class OTPVerifyRequest(BaseModel):
+    email: EmailStr
+    otp: str
+
+
+# ==================================================
 # MARINE PROFILE
 # ==================================================
 

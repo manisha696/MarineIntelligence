@@ -39,14 +39,21 @@ from database import (
 
 from models import (
     User,
-    MarineProfile
+    MarineProfile,
+    OTPVerification
 )
 
 from schemas import (
     RegisterRequest,
     LoginRequest,
+    OTPRequest,
+    OTPVerifyRequest,
     MarineProfileCreate,
     MarineProfileResponse
+)
+from otp_service import (
+    generate_otp,
+    send_otp_email
 )
 
 
@@ -134,8 +141,117 @@ def root():
     return {
         "message": "Marine Intelligence API Running"
     }
+# ==================================================
+# REQUEST REGISTRATION OTP
+# ==================================================
 
+@app.post("/register/request-otp")
+def request_registration_otp(
+    otp_request: OTPRequest,
+    db: Session = Depends(get_db)
+):
 
+    existing_user = db.query(User).filter(
+        User.email == otp_request.email
+    ).first()
+
+    if existing_user:
+        raise HTTPException(
+            status_code=400,
+            detail="Email already registered"
+        )
+
+    otp = generate_otp()
+
+    expires_at = datetime.utcnow() + timedelta(
+        minutes=5
+    )
+
+    new_otp = OTPVerification(
+        email=otp_request.email,
+        otp=otp,
+        purpose="registration",
+        expires_at=expires_at,
+        verified=0
+    )
+
+    db.add(new_otp)
+    db.commit()
+
+    try:
+
+        send_otp_email(
+            otp_request.email,
+            otp
+        )
+
+    except Exception as e:
+
+        db.delete(new_otp)
+        db.commit()
+
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to send OTP email"
+        )
+
+    return {
+        "message": "OTP sent successfully",
+        "email": otp_request.email
+    }
+# ==================================================
+# VERIFY REGISTRATION OTP
+# ==================================================
+
+@app.post("/register/verify-otp")
+def verify_registration_otp(
+    otp_request: OTPVerifyRequest,
+    db: Session = Depends(get_db)
+):
+
+    otp_record = db.query(
+        OTPVerification
+    ).filter(
+        OTPVerification.email == otp_request.email,
+        OTPVerification.purpose == "registration",
+        OTPVerification.verified == 0
+    ).order_by(
+        OTPVerification.created_at.desc()
+    ).first()
+
+    if not otp_record:
+
+        raise HTTPException(
+            status_code=400,
+            detail="OTP not found or already verified"
+        )
+
+    if datetime.utcnow() > otp_record.expires_at:
+
+        raise HTTPException(
+            status_code=400,
+            detail="OTP has expired"
+        )
+
+    if otp_record.otp != otp_request.otp:
+
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid OTP"
+        )
+
+    otp_record.verified = 1
+
+    db.commit()
+
+    return {
+        "message": "Email verified successfully",
+        "email": otp_request.email
+    }
+
+# ==================================================
+# REGISTER
+# ==================================================
 # ==================================================
 # REGISTER
 # ==================================================
@@ -145,6 +261,10 @@ def register(
     user_data: RegisterRequest,
     db: Session = Depends(get_db)
 ):
+
+    # ----------------------------------------------
+    # CHECK IF EMAIL IS ALREADY REGISTERED
+    # ----------------------------------------------
 
     existing_user = db.query(User).filter(
         User.email == user_data.email
@@ -157,9 +277,38 @@ def register(
             detail="Email already registered"
         )
 
+    # ----------------------------------------------
+    # CHECK EMAIL OTP VERIFICATION
+    # ----------------------------------------------
+
+    verified_otp = db.query(
+        OTPVerification
+    ).filter(
+        OTPVerification.email == user_data.email,
+        OTPVerification.purpose == "registration",
+        OTPVerification.verified == 1
+    ).order_by(
+        OTPVerification.created_at.desc()
+    ).first()
+
+    if not verified_otp:
+
+        raise HTTPException(
+            status_code=400,
+            detail="Please verify your email with OTP before registration"
+        )
+
+    # ----------------------------------------------
+    # HASH PASSWORD
+    # ----------------------------------------------
+
     hashed_password = hash_password(
-    user_data.password
+        user_data.password
     )
+
+    # ----------------------------------------------
+    # CREATE USER
+    # ----------------------------------------------
 
     new_user = User(
         name=user_data.name,
@@ -173,14 +322,16 @@ def register(
 
     db.refresh(new_user)
 
+    # ----------------------------------------------
+    # RETURN RESPONSE
+    # ----------------------------------------------
+
     return {
         "message": "User registered successfully",
         "user_id": new_user.id,
         "name": new_user.name,
         "email": new_user.email
     }
-
-
 # ==================================================
 # LOGIN
 # ==================================================
