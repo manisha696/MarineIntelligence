@@ -5,6 +5,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:frontend/login_page.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
@@ -32,7 +33,7 @@ class MarineIntelligenceApp extends StatelessWidget {
         fontFamily: 'sans-serif',
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF285B5B)),
       ),
-      home: const MarineHome(),
+      home: const LoginPage(nextPage: MarineHome()),
     );
   }
 }

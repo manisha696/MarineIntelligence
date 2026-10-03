@@ -27,7 +27,7 @@ from fastapi.security import (
 
 from sqlalchemy.orm import Session
 
-from passlib.context import CryptContext
+import bcrypt
 
 from jose import jwt, JWTError
 
@@ -96,10 +96,22 @@ if pfz_router is not None:
 # PASSWORD HASHING
 # ==================================================
 
-pwd_context = CryptContext(
-    schemes=["bcrypt"],
-    deprecated="auto"
-)
+# ==================================================
+# PASSWORD HASHING
+# ==================================================
+
+def hash_password(password: str) -> str:
+    return bcrypt.hashpw(
+        password.encode("utf-8"),
+        bcrypt.gensalt()
+    ).decode("utf-8")
+
+
+def verify_password(password: str, password_hash: str) -> bool:
+    return bcrypt.checkpw(
+        password.encode("utf-8"),
+        password_hash.encode("utf-8")
+    )
 
 
 # ==================================================
@@ -145,8 +157,8 @@ def register(
             detail="Email already registered"
         )
 
-    hashed_password = pwd_context.hash(
-        user_data.password
+    hashed_password = hash_password(
+    user_data.password
     )
 
     new_user = User(
@@ -190,9 +202,9 @@ def login(
             detail="Invalid email or password"
         )
 
-    password_correct = pwd_context.verify(
-        user_data.password,
-        user.password_hash
+    password_correct = verify_password(
+    user_data.password,
+    user.password_hash
     )
 
     if not password_correct:

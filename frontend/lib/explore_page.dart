@@ -23,8 +23,7 @@ class _ExplorePageState extends State<ExplorePage> {
   // API
   // ============================================================
 
-  static const String apiBaseUrl = 'http://10.10.0.46:8000';
-
+  static const String apiBaseUrl = 'https://marineintelligence.onrender.com';
   // ============================================================
   // DEFAULT LOCATION
   // ============================================================
@@ -158,8 +157,11 @@ class _ExplorePageState extends State<ExplorePage> {
     Future<Map<String, dynamic>> Function() request,
   ) async {
     try {
-      return await request();
-    } catch (_) {
+      final result = await request();
+      debugPrint('MARINE API SUCCESS');
+      return result;
+    } catch (e) {
+      debugPrint('MARINE API ERROR: $e');
       return null;
     }
   }
