@@ -7,7 +7,7 @@ from urllib.parse import quote
 
 router = APIRouter(
     prefix="/pfz",
-    tags=["PFZ Intelligence"],
+    tags=["Potential Fishing Zone"],
 )
 
 
@@ -34,23 +34,8 @@ SST_URL = (
 
 CACHE = {}
 
-CACHE_TTL = 10 * 60
-
-# Last real satellite PFZ result.
-# This is NOT dummy data.
-LAST_SUCCESSFUL_PFZ = {}
-
-LAST_SUCCESSFUL_TTL = 6 * 60 * 60
-
-
-# ============================================================
-# HTTP SETTINGS
-# ============================================================
-
-HEADERS = {
-    "User-Agent": "MarineIntelligence/1.0",
-    "Accept": "application/json",
-}
+CACHE_TTL = 10 * 60          # 10 minutes
+LAST_SUCCESS_TTL = 6 * 60*60  # 6 hours
 
 
 # ============================================================
@@ -65,23 +50,40 @@ def cache_key(latitude, longitude, radius):
     )
 
 
+def safe_float(value):
+    try:
+        if value is None:
+            return None
+
+        number = float(value)
+
+        if math.isnan(number) or math.isinf(number):
+            return None
+
+        return number
+
+    except (ValueError, TypeError):
+        return None
+
+
 def haversine_km(lat1, lon1, lat2, lon2):
     """
-    Calculate distance between two geographic coordinates.
+    Distance between two latitude/longitude points.
     """
 
     earth_radius = 6371.0
 
-    lat1_rad = math.radians(lat1)
-    lat2_rad = math.radians(lat2)
+    lat1 = math.radians(lat1)
+    lat2 = math.radians(lat2)
 
-    dlat = math.radians(lat2 - lat1)
+    dlat = lat2 - lat1
+
     dlon = math.radians(lon2 - lon1)
 
     a = (
         math.sin(dlat / 2) ** 2
-        + math.cos(lat1_rad)
-        * math.cos(lat2_rad)
+        + math.cos(lat1)
+        * math.cos(lat2)
         * math.sin(dlon / 2) ** 2
     )
 
@@ -93,75 +95,74 @@ def haversine_km(lat1, lon1, lat2, lon2):
     return earth_radius * c
 
 
-def safe_float(value):
-    try:
-        if value is None:
-            return None
-
-        number = float(value)
-
-        if not math.isfinite(number):
-            return None
-
-        return number
-
-    except (TypeError, ValueError):
-        return None
-
-
 # ============================================================
 # NOAA REQUEST
 # ============================================================
 
-def request_noaa(url):
-    """
-    Request NOAA data with a few retries.
+def request_noaa(url, query, timeout=90, retries=2):
 
-    No dummy data is generated.
-    """
+    encoded_query = quote(
+        query,
+        safe="[]():,"
+    )
+
+    full_url = f"{url}?{encoded_query}"
+
+    headers = {
+        "User-Agent": "MarineIntelligence/1.0",
+        "Accept": "application/json",
+    }
 
     last_error = None
 
-    for attempt in range(3):
+    for attempt in range(retries + 1):
 
         try:
 
             response = requests.get(
-                url,
-                headers=HEADERS,
-                timeout=90,
+                full_url,
+                headers=headers,
+                timeout=timeout,
                 allow_redirects=True,
             )
 
             if response.status_code == 200:
-                return response
 
-            if response.status_code == 429:
+                try:
+                    return response.json()
+
+                except ValueError:
+                    last_error = (
+                        "NOAA returned invalid JSON response."
+                    )
+
+            elif response.status_code == 429:
+
                 last_error = (
-                    "NOAA rate limit "
-                    f"(HTTP {response.status_code})"
+                    "NOAA service is temporarily "
+                    "rate-limiting requests."
                 )
 
             else:
+
                 last_error = (
                     f"NOAA HTTP {response.status_code}: "
-                    f"{response.text[:200]}"
+                    f"{response.text[:500]}"
                 )
 
         except requests.RequestException as exc:
 
             last_error = str(exc)
 
-        if attempt < 2:
+        if attempt < retries:
+
             time.sleep(2 * (attempt + 1))
 
-    raise RuntimeError(
-        last_error or "NOAA request failed"
-    )
+    raise RuntimeError(last_error or "NOAA request failed.")
 
 
 # ============================================================
-# CHLOROPHYLL
+# FETCH CHLOROPHYLL
 # ============================================================
 
 def fetch_chlorophyll(
@@ -169,33 +170,41 @@ def fetch_chlorophyll(
     longitude,
     radius,
 ):
-    """
-    Fetch actual NOAA VIIRS chlorophyll data
-    around the user's location.
-    """
 
-    lat_min = max(-89.0, latitude - radius)
-    lat_max = min(89.0, latitude + radius)
-
-    lon_min = max(-179.0, longitude - radius)
-    lon_max = min(179.0, longitude + radius)
-
-    query = (
-    "chlor_a"
-    "[last]"
-    "[0]"
-    f"[({lat_min}):({lat_max})]"
-    f"[({lon_min}):({lon_max})]"
-)
-
-    url = (
-        f"{CHLOROPHYLL_URL}?"
-        f"{quote(query, safe='[]():,')}"
+    lat_min = max(
+        -89.0,
+        latitude - radius
     )
 
-    response = request_noaa(url)
+    lat_max = min(
+        89.0,
+        latitude + radius
+    )
 
-    data = response.json()
+    lon_min = max(
+        -179.99,
+        longitude - radius
+    )
+
+    lon_max = min(
+        179.99,
+        longitude + radius
+    )
+
+    query = (
+        "chlor_a"
+        "[last]"
+        "[0]"
+        f"[({lat_min}):({lat_max})]"
+        f"[({lon_min}):({lon_max})]"
+    )
+
+    data = request_noaa(
+        CHLOROPHYLL_URL,
+        query,
+        timeout=90,
+        retries=2,
+    )
 
     table = data.get("table", {})
 
@@ -208,6 +217,10 @@ def fetch_chlorophyll(
         "rows",
         []
     )
+
+    if not rows:
+
+        return []
 
     points = []
 
@@ -227,22 +240,22 @@ def fetch_chlorophyll(
                 item.get("longitude")
             )
 
-            chlor = safe_float(
+            chlorophyll = safe_float(
                 item.get("chlor_a")
             )
 
             if (
                 lat is None
                 or lon is None
-                or chlor is None
+                or chlorophyll is None
             ):
                 continue
 
-            # Basic physical/data-quality filtering.
-            if chlor <= 0:
+            # Valid chlorophyll range
+            if chlorophyll <= 0:
                 continue
 
-            if chlor > 100:
+            if chlorophyll > 100:
                 continue
 
             distance = haversine_km(
@@ -252,35 +265,33 @@ def fetch_chlorophyll(
                 lon,
             )
 
-            # IMPORTANT:
-            # Never allow a point outside user's
-            # requested marine search radius.
-            radius_km = radius * 111.2
-
-            if distance > radius_km * 1.15:
+            # Keep only requested local region
+            if distance > radius * 111.2 * 1.15:
                 continue
 
-            points.append({
-                "latitude": lat,
-                "longitude": lon,
-                "chlorophyll": round(
-                    chlor,
-                    4
-                ),
-                "distance_km": round(
-                    distance,
-                    2
-                ),
-            })
+            points.append(
+                {
+                    "latitude": lat,
+                    "longitude": lon,
+                    "chlorophyll": round(
+                        chlorophyll,
+                        4
+                    ),
+                    "distance_km": round(
+                        distance,
+                        2
+                    ),
+                }
+            )
 
-        except Exception:
+        except (ValueError, TypeError):
             continue
 
     return points
 
 
 # ============================================================
-# SST
+# FETCH SST
 # ============================================================
 
 def fetch_sst(
@@ -288,10 +299,6 @@ def fetch_sst(
     longitude,
     radius,
 ):
-    """
-    Fetch actual NOAA SST data around
-    the user's location.
-    """
 
     lat_min = max(
         -89.0,
@@ -304,12 +311,12 @@ def fetch_sst(
     )
 
     lon_min = max(
-        -179.0,
+        -179.99,
         longitude - radius
     )
 
     lon_max = min(
-        179.0,
+        179.99,
         longitude + radius
     )
 
@@ -320,19 +327,14 @@ def fetch_sst(
         f"[({lon_min}):({lon_max})]"
     )
 
-    url = (
-        f"{SST_URL}?"
-        f"{quote(query, safe='[]():,')}"
+    data = request_noaa(
+        SST_URL,
+        query,
+        timeout=90,
+        retries=2,
     )
 
-    response = request_noaa(url)
-
-    data = response.json()
-
-    table = data.get(
-        "table",
-        {}
-    )
+    table = data.get("table", {})
 
     columns = table.get(
         "columnNames",
@@ -343,6 +345,10 @@ def fetch_sst(
         "rows",
         []
     )
+
+    if not rows:
+
+        return []
 
     points = []
 
@@ -375,8 +381,11 @@ def fetch_sst(
             ):
                 continue
 
-            # Physical SST sanity check.
-            if sst < -2 or sst > 40:
+            # Physically reasonable ocean SST
+            if sst < -2:
+                continue
+
+            if sst > 40:
                 continue
 
             distance = haversine_km(
@@ -386,154 +395,169 @@ def fetch_sst(
                 lon,
             )
 
-            radius_km = radius * 111.2
-
-            if distance > radius_km * 1.15:
+            if distance > radius * 111.2 * 1.15:
                 continue
 
-            points.append({
-                "latitude": lat,
-                "longitude": lon,
-                "sst": round(
-                    sst,
-                    2
-                ),
-                "distance_km": round(
-                    distance,
-                    2
-                ),
-            })
+            points.append(
+                {
+                    "latitude": lat,
+                    "longitude": lon,
+                    "sst": round(
+                        sst,
+                        2
+                    ),
+                    "distance_km": round(
+                        distance,
+                        2
+                    ),
+                }
+            )
 
-        except Exception:
+        except (ValueError, TypeError):
             continue
 
     return points
 
 
 # ============================================================
-# FIND NEAREST SST
+# CHLOROPHYLL SCORE
+# ============================================================
+
+def chlorophyll_score(
+    value,
+    all_values,
+):
+    """
+    Local percentile based score.
+
+    This avoids assuming that one fixed chlorophyll
+    threshold works equally well everywhere.
+    """
+
+    if not all_values:
+        return 0.0
+
+    values = sorted(
+        all_values
+    )
+
+    if len(values) == 1:
+        return 50.0
+
+    lower_count = sum(
+        1
+        for x in values
+        if x <= value
+    )
+
+    percentile = (
+        lower_count
+        / len(values)
+    ) * 100.0
+
+    # Keep useful range between 0-100
+    return round(
+        max(
+            0.0,
+            min(
+                100.0,
+                percentile
+            )
+        ),
+        2
+    )
+
+
+# ============================================================
+# SST SCORE
+# ============================================================
+
+def sst_score(
+    sst
+):
+    """
+    Broad tropical/subtropical marine
+    suitability score.
+
+    Around 26-30 C receives the highest score.
+    """
+
+    if sst is None:
+        return 0.0
+
+    # Excellent zone
+    if 27.0 <= sst <= 29.5:
+        return 100.0
+
+    # Very good
+    if 26.0 <= sst < 27.0:
+        return 85.0
+
+    if 29.5 < sst <= 30.5:
+        return 85.0
+
+    # Moderate
+    if 25.0 <= sst < 26.0:
+        return 65.0
+
+    if 30.5 < sst <= 31.5:
+        return 65.0
+
+    # Low
+    if 24.0 <= sst < 25.0:
+        return 45.0
+
+    if 31.5 < sst <= 32.5:
+        return 45.0
+
+    return 25.0
+
+
+# ============================================================
+# MATCH SST TO CHLOROPHYLL
 # ============================================================
 
 def nearest_sst(
-    latitude,
-    longitude,
+    chl_point,
     sst_points,
+    max_distance_km=50.0,
 ):
     """
     Find nearest SST observation for a
-    chlorophyll pixel.
+    chlorophyll observation.
     """
 
     if not sst_points:
         return None
 
     best = None
-    best_distance = float("inf")
+    best_distance = None
 
-    for point in sst_points:
+    for sst_point in sst_points:
 
         distance = haversine_km(
-            latitude,
-            longitude,
-            point["latitude"],
-            point["longitude"],
+            chl_point["latitude"],
+            chl_point["longitude"],
+            sst_point["latitude"],
+            sst_point["longitude"],
         )
 
-        if distance < best_distance:
+        if distance > max_distance_km:
+            continue
 
+        if (
+            best_distance is None
+            or distance < best_distance
+        ):
+
+            best = sst_point
             best_distance = distance
-            best = point
-
-    # Do not pair completely unrelated
-    # satellite pixels.
-    if best_distance > 30:
-        return None
 
     return best
 
 
 # ============================================================
-# SCORE CHLOROPHYLL
-# ============================================================
-
-def chlorophyll_score(
-    value,
-    minimum,
-    maximum,
-):
-    """
-    Relative score based ONLY on
-    the current local satellite field.
-
-    No hard-coded fake chlorophyll values.
-    """
-
-    if maximum <= minimum:
-        return 50.0
-
-    score = (
-        (value - minimum)
-        / (maximum - minimum)
-    ) * 100
-
-    return round(
-        max(0.0, min(100.0, score)),
-        1
-    )
-
-
-# ============================================================
-# SCORE SST
-# ============================================================
-
-def sst_score(value):
-    """
-    Soft suitability score for tropical
-    Indian marine waters.
-
-    This is an algorithmic component,
-    not an official INCOIS PFZ score.
-    """
-
-    # Broad comfortable marine band.
-    if 26.0 <= value <= 30.0:
-
-        distance = abs(
-            value - 28.0
-        )
-
-        score = 100 - (
-            distance * 10
-        )
-
-        return round(
-            max(0.0, min(100.0, score)),
-            1
-        )
-
-    if value < 26.0:
-
-        score = 100 - (
-            (26.0 - value) * 12
-        )
-
-        return round(
-            max(0.0, min(100.0, score)),
-            1
-        )
-
-    score = 100 - (
-        (value - 30.0) * 12
-    )
-
-    return round(
-        max(0.0, min(100.0, score)),
-        1
-    )
-
-
-# ============================================================
-# BUILD PFZ CANDIDATES
+# BUILD PFZ ZONES
 # ============================================================
 
 def build_pfz_zones(
@@ -543,68 +567,79 @@ def build_pfz_zones(
     sst_points,
 ):
     """
-    Build PFZ candidate zones only from
-    actual satellite observations in the
-    user's requested area.
+    Convert live satellite observations into
+    potential fishing zones.
+
+    IMPORTANT:
+    This does NOT create dummy locations.
+
+    Every returned zone originates from an
+    actual satellite observation.
     """
 
     if not chlorophyll_points:
         return []
 
-    if not sst_points:
-        return []
-
-    chlor_values = [
-        point["chlorophyll"]
-        for point in chlorophyll_points
+    chl_values = [
+        p["chlorophyll"]
+        for p in chlorophyll_points
     ]
-
-    minimum = min(
-        chlor_values
-    )
-
-    maximum = max(
-        chlor_values
-    )
 
     candidates = []
 
+    # --------------------------------------------------------
+    # STEP 1: Evaluate each chlorophyll pixel
+    # --------------------------------------------------------
+
     for chl in chlorophyll_points:
-
-        sst = nearest_sst(
-            chl["latitude"],
-            chl["longitude"],
-            sst_points,
-        )
-
-        if sst is None:
-            continue
 
         chl_score = chlorophyll_score(
             chl["chlorophyll"],
-            minimum,
-            maximum,
+            chl_values,
         )
 
-        temperature_score = sst_score(
-            sst["sst"]
+        # Lowered candidate threshold so
+        # moderate productive areas are not discarded.
+        if chl_score < 50:
+            continue
+
+        # ----------------------------------------------------
+        # Match nearby SST
+        # ----------------------------------------------------
+
+        sst_point = nearest_sst(
+            chl,
+            sst_points,
+            max_distance_km=50.0,
         )
 
-        # Combined algorithmic score.
+        if sst_point is None:
+            # Without SST we don't claim
+            # a full PFZ candidate.
+            continue
+
+        sst_value = sst_point["sst"]
+
+        sst_sc = sst_score(
+            sst_value
+        )
+
+        # ----------------------------------------------------
+        # Combined fishing score
+        # ----------------------------------------------------
+
         fishing_score = (
             chl_score * 0.60
-            + temperature_score * 0.40
+            + sst_sc * 0.40
         )
 
-        # Require meaningful local
-        # chlorophyll potential.
-        if chl_score < 65:
+        if fishing_score < 50:
             continue
 
         if fishing_score >= 75:
             potential = "HIGH"
 
-        elif fishing_score >= 55:
+        elif fishing_score >= 60:
             potential = "MODERATE"
 
         else:
@@ -617,172 +652,275 @@ def build_pfz_zones(
             chl["longitude"],
         )
 
-        candidates.append({
-            "latitude": chl["latitude"],
-            "longitude": chl["longitude"],
-            "chlorophyll": round(
-                chl["chlorophyll"],
-                4
-            ),
-            "sst": round(
-                sst["sst"],
-                2
-            ),
-            "chlorophyll_score": chl_score,
-            "sst_score": temperature_score,
-            "fishing_score": round(
-                fishing_score,
-                2
-            ),
-            "potential": potential,
-            "distance_km": round(
-                distance,
-                2
-            ),
-        })
+        candidates.append(
+            {
+                "latitude": round(
+                    chl["latitude"],
+                    6
+                ),
+                "longitude": round(
+                    chl["longitude"],
+                    6
+                ),
+                "chlorophyll": round(
+                    chl["chlorophyll"],
+                    4
+                ),
+                "sst": round(
+                    sst_value,
+                    2
+                ),
+                "chlorophyll_score": round(
+                    chl_score,
+                    2
+                ),
+                "sst_score": round(
+                    sst_sc,
+                    2
+                ),
+                "fishing_score": round(
+                    fishing_score,
+                    2
+                ),
+                "potential": potential,
+                "distance_km": round(
+                    distance,
+                    2
+                ),
+            }
+        )
 
     if not candidates:
         return []
 
-    # Highest potential first,
-    # then closest to user.
-    candidates.sort(
-        key=lambda item: (
-            -item["fishing_score"],
-            item["distance_km"],
-        )
-    )
+    # ========================================================
+    # STEP 2: CLUSTER NEARBY CANDIDATES
+    # ========================================================
+
+    clusters = []
+
+    for candidate in candidates:
+
+        added_to_cluster = False
+
+        for cluster in clusters:
+
+            center = cluster[0]
+
+            distance = haversine_km(
+                candidate["latitude"],
+                candidate["longitude"],
+                center["latitude"],
+                center["longitude"],
+            )
+
+            # 25 km clustering radius
+            if distance <= 25:
+
+                cluster.append(
+                    candidate
+                )
+
+                added_to_cluster = True
+
+                break
+
+        if not added_to_cluster:
+
+            clusters.append(
+                [candidate]
+            )
 
     # ========================================================
-    # CLUSTER NEARBY PIXELS
+    # STEP 3: CREATE ONE ZONE PER CLUSTER
     # ========================================================
 
     zones = []
 
-    cluster_distance_km = 25.0
+    for index, cluster in enumerate(
+        clusters,
+        start=1
+    ):
 
-    for candidate in candidates:
+        if not cluster:
+            continue
 
-        belongs_to_existing = False
-
-        for zone in zones:
-
-            zone_distance = haversine_km(
-                candidate["latitude"],
-                candidate["longitude"],
-                zone["latitude"],
-                zone["longitude"],
+        best_pixel = max(
+            cluster,
+            key=lambda x: (
+                x["fishing_score"],
+                x["chlorophyll"],
             )
+        )
 
-            if zone_distance <= cluster_distance_km:
+        avg_lat = sum(
+            p["latitude"]
+            for p in cluster
+        ) / len(cluster)
 
-                belongs_to_existing = True
+        avg_lon = sum(
+            p["longitude"]
+            for p in cluster
+        ) / len(cluster)
 
-                # Keep strongest candidate
-                # inside this local zone.
-                if (
-                    candidate["fishing_score"]
-                    > zone["fishing_score"]
-                ):
-                    zone.update(
-                        candidate
-                    )
+        avg_chl = sum(
+            p["chlorophyll"]
+            for p in cluster
+        ) / len(cluster)
 
-                break
+        avg_sst = sum(
+            p["sst"]
+            for p in cluster
+        ) / len(cluster)
 
-        if not belongs_to_existing:
+        avg_score = sum(
+            p["fishing_score"]
+            for p in cluster
+        ) / len(cluster)
 
-            zone = dict(candidate)
+        distance = haversine_km(
+            latitude,
+            longitude,
+            avg_lat,
+            avg_lon,
+        )
 
-            zones.append(zone)
+        if avg_score >= 75:
+            potential = "HIGH"
 
-        # Avoid returning too many
-        # individual satellite pixels.
-        if len(zones) >= 15:
-            break
+        elif avg_score >= 60:
+            potential = "MODERATE"
+
+        else:
+            potential = "LOW"
+
+        # Estimate zone radius from
+        # cluster size, capped to sensible values.
+        zone_radius_km = min(
+            40.0,
+            max(
+                8.0,
+                math.sqrt(len(cluster))
+                * 3.5
+            )
+        )
+
+        zones.append(
+            {
+                "zone_id": f"PFZ-{index}",
+                "latitude": round(
+                    avg_lat,
+                    6
+                ),
+                "longitude": round(
+                    avg_lon,
+                    6
+                ),
+                "chlorophyll": round(
+                    avg_chl,
+                    4
+                ),
+                "sst": round(
+                    avg_sst,
+                    2
+                ),
+                "fishing_score": round(
+                    avg_score,
+                    2
+                ),
+                "potential": potential,
+                "distance_km": round(
+                    distance,
+                    2
+                ),
+                "pixel_count": len(
+                    cluster
+                ),
+                "zone_radius_km": round(
+                    zone_radius_km,
+                    2
+                ),
+                "best_pixel": {
+                    "latitude": best_pixel[
+                        "latitude"
+                    ],
+                    "longitude": best_pixel[
+                        "longitude"
+                    ],
+                    "fishing_score": best_pixel[
+                        "fishing_score"
+                    ],
+                    "chlorophyll": best_pixel[
+                        "chlorophyll"
+                    ],
+                    "sst": best_pixel[
+                        "sst"
+                    ],
+                },
+            }
+        )
 
     # ========================================================
-    # ADD ZONE INFORMATION
+    # STEP 4: REMOVE OVERLAPPING ZONES
     # ========================================================
 
     final_zones = []
 
-    for index, zone in enumerate(
+    for zone in sorted(
         zones,
-        start=1
+        key=lambda z: (
+            z["distance_km"],
+            -z["fishing_score"],
+        )
     ):
 
-        if zone["potential"] == "HIGH":
-            zone_radius = 20.0
+        too_close = False
 
-        elif zone["potential"] == "MODERATE":
-            zone_radius = 15.0
+        for existing in final_zones:
 
-        else:
-            zone_radius = 10.0
+            distance = haversine_km(
+                zone["latitude"],
+                zone["longitude"],
+                existing["latitude"],
+                existing["longitude"],
+            )
 
-        final_zones.append({
-            "zone_id": f"PFZ-{index}",
-            "latitude": zone["latitude"],
-            "longitude": zone["longitude"],
-            "chlorophyll": zone["chlorophyll"],
-            "sst": zone["sst"],
-            "chlorophyll_score": zone[
-                "chlorophyll_score"
-            ],
-            "sst_score": zone[
-                "sst_score"
-            ],
-            "fishing_score": zone[
-                "fishing_score"
-            ],
-            "potential": zone[
-                "potential"
-            ],
-            "distance_km": zone[
-                "distance_km"
-            ],
-            "pixel_count": 1,
-            "zone_radius_km": zone_radius,
-            "best_pixel": {
-                "latitude": zone[
-                    "latitude"
-                ],
-                "longitude": zone[
-                    "longitude"
-                ],
-                "fishing_score": zone[
-                    "fishing_score"
-                ],
-                "chlorophyll": zone[
-                    "chlorophyll"
-                ],
-                "sst": zone[
-                    "sst"
-                ],
-            },
-            "fallback": False,
-        })
+            if distance < 15:
+
+                too_close = True
+                break
+
+        if not too_close:
+
+            final_zones.append(
+                zone
+            )
+
+        # Maximum 10 real zones
+        if len(final_zones) >= 10:
+            break
 
     return final_zones
 
 
 # ============================================================
-# API ENDPOINT
+# PFZ API
 # ============================================================
 
 @router.get("/potential")
-def get_pfz_potential(
+def get_pfz(
     latitude: float = Query(
         ...,
         ge=-89,
         le=89,
     ),
+
     longitude: float = Query(
         ...,
         ge=-180,
         le=180,
     ),
+
     radius: float = Query(
         1.5,
         ge=0.2,
@@ -796,29 +934,8 @@ def get_pfz_potential(
         radius,
     )
 
-    print(
-        "\n================================"
-    )
-
-    print(
-        "LIVE PFZ REQUEST"
-    )
-
-    print(
-        f"User location: "
-        f"{latitude}, {longitude}"
-    )
-
-    print(
-        f"Search radius: {radius}"
-    )
-
-    print(
-        "================================"
-    )
-
     # ========================================================
-    # SHORT CACHE
+    # 1. SHORT CACHE
     # ========================================================
 
     cached = CACHE.get(key)
@@ -832,19 +949,18 @@ def get_pfz_potential(
 
         if age < CACHE_TTL:
 
-            result = dict(
-                cached["data"]
-            )
+            result = cached["data"].copy()
 
             result["cached"] = True
-            result["cache_age_seconds"] = round(
-                age
-            )
+
+            result[
+                "cache_age_seconds"
+            ] = round(age)
 
             return result
 
     # ========================================================
-    # LIVE SATELLITE
+    # 2. FETCH LIVE SATELLITE DATA
     # ========================================================
 
     try:
@@ -857,196 +973,76 @@ def get_pfz_potential(
             )
         )
 
-        print(
-            "CHLOROPHYLL POINTS:",
-            len(chlorophyll_points)
-        )
-
         sst_points = fetch_sst(
             latitude,
             longitude,
             radius,
         )
 
-        print(
-            "SST POINTS:",
-            len(sst_points)
-        )
-
-        zones = build_pfz_zones(
-            latitude,
-            longitude,
-            chlorophyll_points,
-            sst_points,
-        )
-
-        print(
-            "PFZ ZONES:",
-            len(zones)
-        )
-
-        # ====================================================
-        # LIVE PFZ FOUND
-        # ====================================================
-
-        if zones:
-
-            high = sum(
-                1
-                for zone in zones
-                if zone["potential"] == "HIGH"
-            )
-
-            moderate = sum(
-                1
-                for zone in zones
-                if zone["potential"] == "MODERATE"
-            )
-
-            low = sum(
-                1
-                for zone in zones
-                if zone["potential"] == "LOW"
-            )
-
-            best_zone = zones[0]
-
-            result = {
-                "source": (
-                    "NOAA CoastWatch "
-                    "Satellite Data"
-                ),
-                "status": "ok",
-                "data_source": (
-                    "live_satellite"
-                ),
-                "cached": False,
-                "center": {
-                    "latitude": latitude,
-                    "longitude": longitude,
-                },
-                "search_radius": radius,
-                "total_zones": len(zones),
-                "high": high,
-                "moderate": moderate,
-                "low": low,
-                "best_zone": best_zone,
-                "points": zones,
-                "message": (
-                    "PFZ candidates detected "
-                    "from live satellite "
-                    "chlorophyll and SST data "
-                    "within the requested area."
-                ),
-            }
-
-            CACHE[key] = {
-                "timestamp": time.time(),
-                "data": result,
-            }
-
-            LAST_SUCCESSFUL_PFZ[key] = {
-                "timestamp": time.time(),
-                "data": result,
-            }
-
-            return result
-
-        # ====================================================
-        # LIVE SATELLITE AVAILABLE BUT
-        # NO PFZ CANDIDATE
-        # ====================================================
-
-        result = {
-            "source": (
-                "NOAA CoastWatch "
-                "Satellite Data"
-            ),
-            "status": "no_pfz",
-            "data_source": (
-                "live_satellite"
-            ),
-            "cached": False,
-            "center": {
-                "latitude": latitude,
-                "longitude": longitude,
-            },
-            "search_radius": radius,
-            "total_zones": 0,
-            "high": 0,
-            "moderate": 0,
-            "low": 0,
-            "best_zone": None,
-            "points": [],
-            "message": (
-                "Live satellite data was "
-                "available, but no PFZ "
-                "candidate was detected "
-                "within your selected area."
-            ),
-        }
-
-        return result
-
     except Exception as exc:
 
-        print(
-            "LIVE PFZ ERROR:",
-            str(exc)
-        )
-
         # ====================================================
-        # LAST REAL SATELLITE RESULT
+        # 3. LAST REAL SATELLITE CACHE
         # ====================================================
 
-        previous = LAST_SUCCESSFUL_PFZ.get(
-            key
-        )
+        if cached:
 
-        if previous:
-
-            age = (
+            cache_age = (
                 time.time()
-                - previous["timestamp"]
+                - cached["timestamp"]
             )
 
-            if age < LAST_SUCCESSFUL_TTL:
+            if cache_age <= LAST_SUCCESS_TTL:
 
-                result = dict(
-                    previous["data"]
-                )
+                result = cached["data"].copy()
 
-                result["data_source"] = (
-                    "cached_satellite"
-                )
+                result[
+                    "cached"
+                ] = True
 
-                result["cached"] = True
+                result[
+                    "data_source"
+                ] = "last_real_satellite_cache"
 
                 result[
                     "cache_age_seconds"
-                ] = round(age)
+                ] = round(cache_age)
 
-                result["message"] = (
+                result[
+                    "message"
+                ] = (
                     "Live satellite service "
-                    "is temporarily unavailable. "
-                    "Showing the last successful "
-                    "real satellite PFZ result "
-                    "for this location."
+                    "was temporarily unavailable. "
+                    "Showing the latest real satellite "
+                    "result available in memory."
                 )
 
                 return result
 
         # ====================================================
-        # NO FAKE FALLBACK
+        # 4. NO DUMMY FALLBACK
         # ====================================================
 
-        return {
-            "source": (
-                "NOAA CoastWatch "
-                "Satellite Data"
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Live NOAA satellite data is "
+                "temporarily unavailable and "
+                "no recent real satellite cache "
+                f"is available. Error: {exc}"
             ),
+        )
+
+    # ========================================================
+    # 5. NO DATA
+    # ========================================================
+
+    if not chlorophyll_points:
+
+        result = {
+            "source": "NOAA CoastWatch Satellite Data",
             "status": "no_data",
-            "data_source": "none",
+            "data_source": "live_satellite",
             "cached": False,
             "center": {
                 "latitude": latitude,
@@ -1060,10 +1056,168 @@ def get_pfz_potential(
             "best_zone": None,
             "points": [],
             "message": (
-                "Live satellite data is "
-                "temporarily unavailable "
-                "for this request. No "
-                "synthetic or dummy PFZ "
-                "locations were generated."
+                "Live satellite data was available, "
+                "but no valid chlorophyll observations "
+                "were found near the selected location."
             ),
         }
+
+        CACHE[key] = {
+            "timestamp": time.time(),
+            "data": result,
+        }
+
+        return result
+
+    # ========================================================
+    # 6. BUILD REAL PFZ ZONES
+    # ========================================================
+
+    zones = build_pfz_zones(
+        latitude,
+        longitude,
+        chlorophyll_points,
+        sst_points,
+    )
+
+    # ========================================================
+    # 7. NO PFZ CANDIDATE
+    # ========================================================
+
+    if not zones:
+
+        result = {
+            "source": "NOAA CoastWatch Satellite Data",
+            "status": "no_pfz",
+            "data_source": "live_satellite",
+            "cached": False,
+            "center": {
+                "latitude": latitude,
+                "longitude": longitude,
+            },
+            "search_radius": radius,
+            "total_zones": 0,
+            "high": 0,
+            "moderate": 0,
+            "low": 0,
+            "best_zone": None,
+            "points": [],
+            "observations": {
+                "chlorophyll": len(
+                    chlorophyll_points
+                ),
+                "sst": len(
+                    sst_points
+                ),
+            },
+            "message": (
+                "Live satellite data was available, "
+                "but no PFZ candidate was detected "
+                "within your selected area."
+            ),
+        }
+
+        CACHE[key] = {
+            "timestamp": time.time(),
+            "data": result,
+        }
+
+        return result
+
+    # ========================================================
+    # 8. COUNTS
+    # ========================================================
+
+    high = sum(
+        1
+        for z in zones
+        if z["potential"] == "HIGH"
+    )
+
+    moderate = sum(
+        1
+        for z in zones
+        if z["potential"] == "MODERATE"
+    )
+
+    low = sum(
+        1
+        for z in zones
+        if z["potential"] == "LOW"
+    )
+
+    # ========================================================
+    # 9. BEST ZONE
+    # ========================================================
+    #
+    # Best means strongest fishing score.
+    # Not simply the nearest point.
+    #
+
+    best_zone = max(
+        zones,
+        key=lambda z: (
+            z["fishing_score"],
+            -z["distance_km"],
+        )
+    )
+
+    # ========================================================
+    # 10. FINAL RESPONSE
+    # ========================================================
+
+    result = {
+        "source": "NOAA CoastWatch Satellite Data",
+
+        "status": "ok",
+
+        "data_source": "live_satellite",
+
+        "cached": False,
+
+        "center": {
+            "latitude": latitude,
+            "longitude": longitude,
+        },
+
+        "search_radius": radius,
+
+        "total_zones": len(zones),
+
+        "high": high,
+
+        "moderate": moderate,
+
+        "low": low,
+
+        "best_zone": best_zone,
+
+        # Flutter currently reads this field.
+        "points": zones,
+
+        "observations": {
+            "chlorophyll": len(
+                chlorophyll_points
+            ),
+            "sst": len(
+                sst_points
+            ),
+        },
+
+        "message": (
+            "PFZ candidates generated from "
+            "live NOAA satellite chlorophyll "
+            "and sea-surface-temperature observations."
+        ),
+    }
+
+    # ========================================================
+    # 11. SAVE REAL SATELLITE RESULT
+    # ========================================================
+
+    CACHE[key] = {
+        "timestamp": time.time(),
+        "data": result,
+    }
+
+    return result
