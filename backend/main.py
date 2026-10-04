@@ -150,7 +150,6 @@ def request_registration_otp(
     otp_request: OTPRequest,
     db: Session = Depends(get_db)
 ):
-
     existing_user = db.query(User).filter(
         User.email == otp_request.email
     ).first()
@@ -162,10 +161,7 @@ def request_registration_otp(
         )
 
     otp = generate_otp()
-
-    expires_at = datetime.utcnow() + timedelta(
-        minutes=5
-    )
+    expires_at = datetime.utcnow() + timedelta(minutes=5)
 
     new_otp = OTPVerification(
         email=otp_request.email,
@@ -179,13 +175,13 @@ def request_registration_otp(
     db.commit()
 
     try:
-
         send_otp_email(
             otp_request.email,
             otp
         )
 
     except Exception as e:
+        print("OTP EMAIL ERROR:", repr(e))
 
         db.delete(new_otp)
         db.commit()
@@ -199,56 +195,6 @@ def request_registration_otp(
         "message": "OTP sent successfully",
         "email": otp_request.email
     }
-# ==================================================
-# VERIFY REGISTRATION OTP
-# ==================================================
-
-@app.post("/register/verify-otp")
-def verify_registration_otp(
-    otp_request: OTPVerifyRequest,
-    db: Session = Depends(get_db)
-):
-
-    otp_record = db.query(
-        OTPVerification
-    ).filter(
-        OTPVerification.email == otp_request.email,
-        OTPVerification.purpose == "registration",
-        OTPVerification.verified == 0
-    ).order_by(
-        OTPVerification.created_at.desc()
-    ).first()
-
-    if not otp_record:
-
-        raise HTTPException(
-            status_code=400,
-            detail="OTP not found or already verified"
-        )
-
-    if datetime.utcnow() > otp_record.expires_at:
-
-        raise HTTPException(
-            status_code=400,
-            detail="OTP has expired"
-        )
-
-    if otp_record.otp != otp_request.otp:
-
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid OTP"
-        )
-
-    otp_record.verified = 1
-
-    db.commit()
-
-    return {
-        "message": "Email verified successfully",
-        "email": otp_request.email
-    }
-
 # ==================================================
 # REGISTER
 # ==================================================
