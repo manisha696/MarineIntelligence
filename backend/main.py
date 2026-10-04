@@ -201,7 +201,46 @@ def request_registration_otp(
 # ==================================================
 # REGISTER
 # ==================================================
+@app.post("/register/verify-otp")
+def verify_registration_otp(
+    otp_request: OTPVerifyRequest,
+    db: Session = Depends(get_db)
+):
+    otp_record = db.query(
+        OTPVerification
+    ).filter(
+        OTPVerification.email == otp_request.email,
+        OTPVerification.purpose == "registration",
+        OTPVerification.verified == 0
+    ).order_by(
+        OTPVerification.created_at.desc()
+    ).first()
 
+    if not otp_record:
+        raise HTTPException(
+            status_code=400,
+            detail="OTP not found or already verified"
+        )
+
+    if datetime.utcnow() > otp_record.expires_at:
+        raise HTTPException(
+            status_code=400,
+            detail="OTP has expired"
+        )
+
+    if otp_record.otp != otp_request.otp:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid OTP"
+        )
+
+    otp_record.verified = 1
+    db.commit()
+
+    return {
+        "message": "Email verified successfully",
+        "email": otp_request.email
+    }
 @app.post("/register")
 def register(
     user_data: RegisterRequest,
