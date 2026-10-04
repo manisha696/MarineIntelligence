@@ -1,37 +1,63 @@
 import os
-import requests
+import base64
+from email.message import EmailMessage
 
 from dotenv import load_dotenv
 
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
+
+
 load_dotenv()
 
-RESEND_API_KEY = os.getenv("RESEND_API_KEY")
-RESEND_URL = "https://api.resend.com/emails"
-
-# Use the sender address available in your Resend account.
-# For initial testing, Resend may provide an onboarding sender.
-RESEND_FROM = os.getenv(
-    "RESEND_FROM",
-    "Marine Intelligence <onboarding@resend.dev>"
-)
+GMAIL_CLIENT_ID = os.getenv("GMAIL_CLIENT_ID")
+GMAIL_CLIENT_SECRET = os.getenv("GMAIL_CLIENT_SECRET")
+GMAIL_REFRESH_TOKEN = os.getenv("GMAIL_REFRESH_TOKEN")
+GMAIL_SENDER = os.getenv("GMAIL_SENDER")
 
 
 def generate_otp() -> str:
     import random
-
     return str(random.randint(100000, 999999))
 
 
 def send_otp_email(recipient_email: str, otp: str):
-    if not RESEND_API_KEY:
-        raise RuntimeError("RESEND_API_KEY is not configured")
 
-    payload = {
-        "from": RESEND_FROM,
-        "to": [recipient_email],
-        "subject": "Marine Intelligence - Email Verification OTP",
-        "text": f"""
-Marine Intelligence
+    if not GMAIL_CLIENT_ID:
+        raise RuntimeError("GMAIL_CLIENT_ID is not configured")
+
+    if not GMAIL_CLIENT_SECRET:
+        raise RuntimeError("GMAIL_CLIENT_SECRET is not configured")
+
+    if not GMAIL_REFRESH_TOKEN:
+        raise RuntimeError("GMAIL_REFRESH_TOKEN is not configured")
+
+    if not GMAIL_SENDER:
+        raise RuntimeError("GMAIL_SENDER is not configured")
+
+    credentials = Credentials(
+        token=None,
+        refresh_token=GMAIL_REFRESH_TOKEN,
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=GMAIL_CLIENT_ID,
+        client_secret=GMAIL_CLIENT_SECRET,
+        scopes=["https://www.googleapis.com/auth/gmail.send"],
+    )
+
+    service = build(
+        "gmail",
+        "v1",
+        credentials=credentials
+    )
+
+    message = EmailMessage()
+
+    message["From"] = GMAIL_SENDER
+    message["To"] = recipient_email
+    message["Subject"] = "Marine Intelligence - Email Verification OTP"
+
+    message.set_content(
+        f"""Marine Intelligence
 
 Your email verification OTP is:
 
@@ -44,19 +70,17 @@ If you did not request this verification, please ignore this email.
 Regards,
 Marine Intelligence Team
 """
-    }
-
-    response = requests.post(
-        RESEND_URL,
-        headers={
-            "Authorization": f"Bearer {RESEND_API_KEY}",
-            "Content-Type": "application/json"
-        },
-        json=payload,
-        timeout=20
     )
 
-    if response.status_code >= 400:
-        raise RuntimeError(
-            f"Resend API error {response.status_code}: {response.text}"
-        )
+    encoded_message = base64.urlsafe_b64encode(
+        message.as_bytes()
+    ).decode()
+
+    body = {
+        "raw": encoded_message
+    }
+
+    service.users().messages().send(
+        userId="me",
+        body=body
+    ).execute()
