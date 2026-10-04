@@ -280,9 +280,9 @@ class RiskEngine {
 
 class MarineHome extends StatefulWidget {
   final String userName;
+  final String? token;
 
-  const MarineHome({super.key, required this.userName});
-
+  const MarineHome({super.key, required this.userName, this.token});
   @override
   State<MarineHome> createState() => _MarineHomeState();
 }
@@ -298,6 +298,10 @@ class _MarineHomeState extends State<MarineHome>
   bool loading = true;
 
   String? error;
+
+  Map<String, dynamic>? userProfile;
+
+  bool profileLoading = false;
 
   int selectedNavigation = 0;
 
@@ -322,6 +326,7 @@ class _MarineHomeState extends State<MarineHome>
     )..repeat();
 
     _loadLiveData();
+    _loadUserProfile();
   }
 
   @override
@@ -384,6 +389,41 @@ class _MarineHomeState extends State<MarineHome>
     }
   }
 
+  Future<void> _loadUserProfile() async {
+    if (widget.token == null || widget.token!.isEmpty) {
+      return;
+    }
+
+    setState(() {
+      profileLoading = true;
+    });
+
+    try {
+      final response = await http.get(
+        Uri.parse('https://marineintelligence.onrender.com/profile'),
+        headers: {'Authorization': 'Bearer ${widget.token}'},
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+
+        if (!mounted) return;
+
+        setState(() {
+          userProfile = Map<String, dynamic>.from(data);
+        });
+      }
+    } catch (e) {
+      // Profile data is optional for the home screen.
+    } finally {
+      if (mounted) {
+        setState(() {
+          profileLoading = false;
+        });
+      }
+    }
+  }
+
   // ==========================================================================
   // BUILD
   // ==========================================================================
@@ -426,6 +466,7 @@ class _MarineHomeState extends State<MarineHome>
               SliverToBoxAdapter(child: _seaPulse()),
               SliverToBoxAdapter(child: _talkToSea()),
               SliverToBoxAdapter(child: _boatStatus()),
+              SliverToBoxAdapter(child: _sosButton()),
               const SliverToBoxAdapter(child: SizedBox(height: 110)),
             ],
           ),
@@ -1069,6 +1110,56 @@ class _MarineHomeState extends State<MarineHome>
     );
   }
 
+  Widget _sosButton() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(22, 20, 22, 0),
+      child: SizedBox(
+        width: double.infinity,
+        height: 58,
+        child: FilledButton.icon(
+          onPressed: _showSOSConfirmation,
+          style: FilledButton.styleFrom(
+            backgroundColor: const Color(0xFF9B3D3D),
+            foregroundColor: Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(19),
+            ),
+          ),
+          icon: const Icon(Icons.sos_rounded),
+          label: const Text(
+            'EMERGENCY SOS',
+            style: TextStyle(fontWeight: FontWeight.w700, letterSpacing: 1),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showSOSConfirmation() {
+    final contactName = userProfile?['family_contact_name']?.toString().trim();
+
+    final displayContact = (contactName == null || contactName.isEmpty)
+        ? 'your emergency contact'
+        : contactName;
+
+    showGeneralDialog(
+      context: context,
+      barrierDismissible: false,
+      barrierLabel: 'Emergency SOS',
+      barrierColor: Colors.black.withOpacity(0.72),
+      transitionDuration: const Duration(milliseconds: 350),
+      pageBuilder: (_, __, ___) {
+        return _SOSDemoOverlay(contactName: displayContact);
+      },
+      transitionBuilder: (_, animation, __, child) {
+        return ScaleTransition(
+          scale: CurvedAnimation(parent: animation, curve: Curves.easeOutBack),
+          child: child,
+        );
+      },
+    );
+  }
+
   Widget _boatTile({
     required IconData icon,
     required String title,
@@ -1464,6 +1555,12 @@ class _MarineHomeState extends State<MarineHome>
 
   Widget _profilePage() {
     final data = marineData;
+    final profile = userProfile;
+
+    final userType = profile?['user_type']?.toString() ?? 'Not set';
+    final language = profile?['preferred_language']?.toString() ?? 'Not set';
+    final boatName = profile?['boat_name']?.toString();
+    final boatType = profile?['boat_type']?.toString();
 
     return Stack(
       children: [
@@ -1494,38 +1591,50 @@ class _MarineHomeState extends State<MarineHome>
                 color: const Color(0xFF234E50),
                 borderRadius: BorderRadius.circular(28),
               ),
-              child: const Row(
+              child: Row(
                 children: [
                   CircleAvatar(
                     radius: 31,
-                    backgroundColor: Color(0xFFA3D6C8),
+                    backgroundColor: const Color(0xFFA3D6C8),
                     child: Text(
-                      'M',
-                      style: TextStyle(
+                      widget.userName.isNotEmpty
+                          ? widget.userName[0].toUpperCase()
+                          : 'U',
+                      style: const TextStyle(
                         color: Color(0xFF183B3D),
                         fontSize: 22,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
                   ),
-                  SizedBox(width: 15),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Manisha',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 20,
-                          fontWeight: FontWeight.w700,
+
+                  const SizedBox(width: 15),
+
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          widget.userName,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 20,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
-                      ),
-                      SizedBox(height: 5),
-                      Text(
-                        'Fisherman',
-                        style: TextStyle(color: Colors.white60, fontSize: 12),
-                      ),
-                    ],
+
+                        const SizedBox(height: 5),
+
+                        Text(
+                          profileLoading ? 'Loading profile...' : userType,
+                          style: const TextStyle(
+                            color: Colors.white60,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
@@ -1533,9 +1642,17 @@ class _MarineHomeState extends State<MarineHome>
 
             const SizedBox(height: 18),
 
-            _profileItem(Icons.language, 'Language', 'English'),
+            _profileItem(Icons.language, 'Language', language),
 
-            _profileItem(Icons.sailing, 'Boat', 'Sea Explorer'),
+            _profileItem(Icons.person_outline, 'Marine Role', userType),
+
+            _profileItem(
+              Icons.sailing,
+              'Boat',
+              boatName != null && boatName.isNotEmpty
+                  ? boatName
+                  : (boatType ?? 'Not set'),
+            ),
 
             _profileItem(
               Icons.location_on_outlined,
@@ -1555,20 +1672,31 @@ class _MarineHomeState extends State<MarineHome>
             const SizedBox(height: 20),
 
             GestureDetector(
-              onTap: _loadLiveData,
+              onTap: _loadUserProfile,
               child: Container(
                 padding: const EdgeInsets.all(17),
                 decoration: BoxDecoration(
                   color: const Color(0xFFE5EFEA),
                   borderRadius: BorderRadius.circular(20),
                 ),
-                child: const Row(
+                child: Row(
                   children: [
-                    Icon(Icons.sync, color: Color(0xFF285B5B)),
-                    SizedBox(width: 12),
+                    profileLoading
+                        ? const SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Color(0xFF285B5B),
+                            ),
+                          )
+                        : const Icon(Icons.sync, color: Color(0xFF285B5B)),
+
+                    const SizedBox(width: 12),
+
                     Text(
-                      'Refresh marine intelligence',
-                      style: TextStyle(
+                      profileLoading ? 'Loading profile...' : 'Refresh profile',
+                      style: const TextStyle(
                         fontWeight: FontWeight.w600,
                         color: Color(0xFF315757),
                       ),
@@ -2237,5 +2365,367 @@ class PulsePainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant PulsePainter oldDelegate) {
     return oldDelegate.risk != risk;
+  }
+}
+
+class _SOSDemoOverlay extends StatefulWidget {
+  final String contactName;
+
+  const _SOSDemoOverlay({required this.contactName});
+
+  @override
+  State<_SOSDemoOverlay> createState() => _SOSDemoOverlayState();
+}
+
+class _SOSDemoOverlayState extends State<_SOSDemoOverlay> {
+  int stage = 0;
+
+  Timer? timer;
+
+  @override
+  void initState() {
+    super.initState();
+
+    timer = Timer.periodic(const Duration(milliseconds: 1800), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+
+      if (stage < 3) {
+        setState(() {
+          stage++;
+        });
+      } else {
+        timer.cancel();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: SafeArea(
+        child: Container(
+          margin: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: const Color(0xFF160D0D),
+            borderRadius: BorderRadius.circular(30),
+            border: Border.all(color: const Color(0xFFE05A5A), width: 1.5),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.red.withOpacity(0.25),
+                blurRadius: 35,
+                spreadRadius: 5,
+              ),
+            ],
+          ),
+          child: Column(
+            children: [
+              const SizedBox(height: 25),
+
+              // TOP STATUS
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Container(
+                    width: 9,
+                    height: 9,
+                    decoration: const BoxDecoration(
+                      color: Color(0xFFFF4D4D),
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  const Text(
+                    'EMERGENCY PROTOCOL',
+                    style: TextStyle(
+                      color: Color(0xFFFF7777),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 2,
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 35),
+
+              // SOS ICON
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 500),
+                width: stage >= 3 ? 105 : 125,
+                height: stage >= 3 ? 105 : 125,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: stage >= 3
+                      ? const Color(0xFF245A3A)
+                      : const Color(0xFF7F2525),
+                  border: Border.all(
+                    color: stage >= 3
+                        ? const Color(0xFF68D391)
+                        : const Color(0xFFFF6666),
+                    width: 2,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: (stage >= 3 ? Colors.green : Colors.red)
+                          .withOpacity(0.35),
+                      blurRadius: 30,
+                      spreadRadius: 5,
+                    ),
+                  ],
+                ),
+                child: Icon(
+                  stage >= 3
+                      ? Icons.check_rounded
+                      : stage == 1
+                      ? Icons.mic_rounded
+                      : stage == 2
+                      ? Icons.location_on_rounded
+                      : Icons.warning_rounded,
+                  color: Colors.white,
+                  size: 48,
+                ),
+              ),
+
+              const SizedBox(height: 30),
+
+              // MAIN MESSAGE
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 28),
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 350),
+                  child: _stageContent(),
+                ),
+              ),
+
+              const Spacer(),
+
+              // PROGRESS
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 35),
+                child: Column(
+                  children: [
+                    LinearProgressIndicator(
+                      value: (stage + 1) / 4,
+                      minHeight: 5,
+                      borderRadius: BorderRadius.circular(10),
+                      backgroundColor: Colors.white12,
+                      valueColor: const AlwaysStoppedAnimation<Color>(
+                        Color(0xFFFF5C5C),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      'Emergency system ${stage + 1}/4',
+                      style: const TextStyle(
+                        color: Colors.white54,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 28),
+
+              // CLOSE BUTTON
+              if (stage >= 3)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 28),
+                  child: SizedBox(
+                    width: double.infinity,
+                    height: 48,
+                    child: ElevatedButton(
+                      onPressed: () {
+                        Navigator.pop(context);
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF245A3A),
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                      ),
+                      child: const Text(
+                        'DONE',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+
+              const SizedBox(height: 22),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _stageContent() {
+    if (stage == 0) {
+      return Column(
+        key: const ValueKey('risk'),
+        children: const [
+          Text(
+            'RISK ZONE DETECTED',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 23,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.5,
+            ),
+          ),
+          SizedBox(height: 12),
+          Text(
+            'You have entered a high-risk marine area.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.white60, fontSize: 13, height: 1.5),
+          ),
+          SizedBox(height: 18),
+          Text(
+            'Emergency protocol activated',
+            style: TextStyle(
+              color: Color(0xFFFF7777),
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      );
+    }
+
+    if (stage == 1) {
+      return Column(
+        key: const ValueKey('voice'),
+        children: const [
+          Text(
+            'VOICE RECORDING STARTED',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 21,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          SizedBox(height: 12),
+          Text(
+            'Speak if you need assistance.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.white60, fontSize: 13),
+          ),
+          SizedBox(height: 20),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              _PulseDot(),
+              SizedBox(width: 6),
+              _PulseDot(),
+              SizedBox(width: 6),
+              _PulseDot(),
+              SizedBox(width: 12),
+              Text(
+                'Recording...',
+                style: TextStyle(
+                  color: Color(0xFFFF7777),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ],
+      );
+    }
+
+    if (stage == 2) {
+      return Column(
+        key: const ValueKey('location'),
+        children: const [
+          Text(
+            'LOCATION CAPTURED',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 22,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          SizedBox(height: 12),
+          Icon(Icons.gps_fixed_rounded, color: Color(0xFF68D391), size: 30),
+          SizedBox(height: 12),
+          Text(
+            'Your current marine position has been secured.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.white60, fontSize: 13, height: 1.5),
+          ),
+        ],
+      );
+    }
+
+    return Column(
+      key: const ValueKey('sent'),
+      children: [
+        const Icon(
+          Icons.mark_email_read_rounded,
+          color: Color(0xFF68D391),
+          size: 45,
+        ),
+        const SizedBox(height: 16),
+        const Text(
+          'SOS ALERT SENT',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 23,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 14),
+        Text(
+          'Message sent to ${widget.contactName}',
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            color: Color(0xFF68D391),
+            fontSize: 15,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'Emergency contact has been notified.',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: Colors.white60, fontSize: 12),
+        ),
+      ],
+    );
+  }
+}
+
+class _PulseDot extends StatelessWidget {
+  const _PulseDot();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 7,
+      height: 7,
+      decoration: const BoxDecoration(
+        color: Color(0xFFFF5C5C),
+        shape: BoxShape.circle,
+      ),
+    );
   }
 }

@@ -545,6 +545,36 @@ def get_profile(
 
     return profile
 
+@app.post(
+    "/sos",
+    tags=["Emergency SOS"]
+)
+def send_sos(
+    user: User = Depends(get_authenticated_user),
+    db: Session = Depends(get_db)
+):
+    profile = db.query(
+        MarineProfile
+    ).filter(
+        MarineProfile.user_id == user.id
+    ).first()
+
+    if not profile:
+        raise HTTPException(
+            status_code=404,
+            detail="Marine profile not found"
+        )
+
+    if not profile.family_contact_number:
+        raise HTTPException(
+            status_code=400,
+            detail="Emergency contact number is not configured"
+        )
+
+    return {
+        "message": "SOS request received",
+        "emergency_contact": profile.family_contact_number
+    }
 
 # ==================================================
 # UPDATE MARINE PROFILE

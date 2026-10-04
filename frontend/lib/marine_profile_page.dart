@@ -130,7 +130,10 @@ class _MarineProfilePageState extends State<MarineProfilePage> {
 
         Navigator.pushAndRemoveUntil(
           context,
-          MaterialPageRoute(builder: (_) => MarineHome(userName: widget.name)),
+          MaterialPageRoute(
+            builder: (_) =>
+                MarineHome(userName: widget.name, token: widget.token),
+          ),
           (route) => false,
         );
       } else {
