@@ -39,12 +39,16 @@ class MarineProfileCreate(BaseModel):
     user_type: str
     preferred_language: str = "English"
 
+    # SOS emergency contact
+    family_contact_name: Optional[str] = None
+    family_contact_number: Optional[str] = None
+    relationship: Optional[str] = None
+
     latitude: Optional[float] = None
     longitude: Optional[float] = None
 
     boat_name: Optional[str] = None
     boat_type: Optional[str] = None
-
 
 class MarineProfileResponse(BaseModel):
     id: int
@@ -52,6 +56,11 @@ class MarineProfileResponse(BaseModel):
 
     user_type: str
     preferred_language: str
+
+    # SOS emergency contact
+    family_contact_name: Optional[str]
+    family_contact_number: Optional[str]
+    relationship: Optional[str]
 
     latitude: Optional[float]
     longitude: Optional[float]
@@ -61,3 +70,18 @@ class MarineProfileResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+    class MarineProfileCreate(BaseModel):
+     user_type: str
+    preferred_language: str = "English"
+
+    # SOS emergency contact
+    family_contact_name: Optional[str] = None
+    family_contact_number: Optional[str] = None
+    relationship: Optional[str] = None
+
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+
+    boat_name: Optional[str] = None
+    boat_type: Optional[str] = None    
