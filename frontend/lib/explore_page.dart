@@ -1,10 +1,12 @@
+// ignore_for_file: unused_local_variable
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
+import 'package:geolocator/geolocator.dart';
 
 class ExplorePage extends StatefulWidget {
   final double? latitude;
@@ -48,6 +50,10 @@ class _ExplorePageState extends State<ExplorePage> {
   // ============================================================
 
   LatLng get currentLocation {
+    if (livePosition != null) {
+      return LatLng(livePosition!.latitude, livePosition!.longitude);
+    }
+
     if (widget.latitude != null && widget.longitude != null) {
       return LatLng(widget.latitude!, widget.longitude!);
     }
@@ -64,6 +70,8 @@ class _ExplorePageState extends State<ExplorePage> {
   bool showPFZ = true;
   bool showRisk = true;
   bool showSafeZones = false;
+  LatLng? geofenceAnchor;
+  double geofenceSpeedKmh = 0.0;
 
   // ============================================================
   // CHLOROPHYLL DATA
@@ -114,12 +122,79 @@ class _ExplorePageState extends State<ExplorePage> {
   // ============================================================
   // INIT
   // ============================================================
+  Position? livePosition;
+  StreamSubscription<Position>? positionSubscription;
+  bool locationLoading = true;
+  Future<void> _startLiveLocation() async {
+    try {
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+
+      if (!serviceEnabled) {
+        if (mounted) {
+          setState(() {
+            locationLoading = false;
+          });
+        }
+        return;
+      }
+
+      LocationPermission permission = await Geolocator.checkPermission();
+
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        if (mounted) {
+          setState(() {
+            locationLoading = false;
+          });
+        }
+        return;
+      }
+
+      final initialPosition = await Geolocator.getCurrentPosition();
+
+      if (mounted) {
+        setState(() {
+          livePosition = initialPosition;
+          locationLoading = false;
+        });
+      }
+
+      positionSubscription =
+          Geolocator.getPositionStream(
+            locationSettings: const LocationSettings(
+              accuracy: LocationAccuracy.high,
+              distanceFilter: 5,
+            ),
+          ).listen((Position position) {
+            if (!mounted) return;
+
+            setState(() {
+              livePosition = position;
+
+              geofenceSpeedKmh = position.speed * 3.6;
+
+              geofenceAnchor ??= LatLng(position.latitude, position.longitude);
+            });
+          });
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          locationLoading = false;
+        });
+      }
+    }
+  }
 
   @override
   void initState() {
     super.initState();
 
     _loadAllMarineData();
+    _startLiveLocation();
   }
 
   // ============================================================
@@ -1083,6 +1158,111 @@ class _ExplorePageState extends State<ExplorePage> {
     );
   }
 
+  bool showGeofences = true;
+
+  double geofenceDistanceKm = 1.4;
+  double geofenceEtaMinutes = 8;
+
+  double geofenceHeading = 0.0;
+  // ============================================================
+  // GEO-FENCE INTELLIGENCE
+  // ============================================================
+
+  List<Polygon> get geofencePolygons {
+    final p = geofenceAnchor ?? currentLocation;
+
+    // Demo geofence geometry.
+    // Replace these coordinates later with official GIS boundaries.
+    final restrictedZone = <LatLng>[
+      LatLng(p.latitude + 0.010, p.longitude + 0.006),
+      LatLng(p.latitude + 0.016, p.longitude + 0.022),
+      LatLng(p.latitude + 0.004, p.longitude + 0.034),
+      LatLng(p.latitude - 0.010, p.longitude + 0.025),
+      LatLng(p.latitude - 0.012, p.longitude + 0.006),
+    ];
+
+    final protectedArea = <LatLng>[
+      LatLng(p.latitude + 0.055, p.longitude - 0.045),
+      LatLng(p.latitude + 0.072, p.longitude - 0.015),
+      LatLng(p.latitude + 0.050, p.longitude + 0.010),
+      LatLng(p.latitude + 0.025, p.longitude - 0.005),
+      LatLng(p.latitude + 0.030, p.longitude - 0.040),
+    ];
+
+    final sensitiveZone = <LatLng>[
+      LatLng(p.latitude - 0.055, p.longitude + 0.055),
+      LatLng(p.latitude - 0.038, p.longitude + 0.085),
+      LatLng(p.latitude - 0.065, p.longitude + 0.105),
+      LatLng(p.latitude - 0.090, p.longitude + 0.075),
+      LatLng(p.latitude - 0.082, p.longitude + 0.045),
+    ];
+
+    final maritimeBoundary = <LatLng>[
+      LatLng(p.latitude - 0.12, p.longitude - 0.10),
+      LatLng(p.latitude - 0.02, p.longitude - 0.04),
+      LatLng(p.latitude + 0.08, p.longitude - 0.015),
+      LatLng(p.latitude + 0.16, p.longitude + 0.015),
+    ];
+
+    return [
+      Polygon(
+        points: restrictedZone,
+        color: const Color(0xFFFF9B62).withValues(alpha: .22),
+        borderColor: const Color(0xFFFF8A3D),
+        borderStrokeWidth: 2.5,
+        label: 'Restricted Fishing Zone',
+        labelStyle: const TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          color: Color(0xFF9A4C18),
+        ),
+      ),
+
+      Polygon(
+        points: protectedArea,
+        color: const Color(0xFF9C6ADE).withValues(alpha: .20),
+        borderColor: const Color(0xFF8752C7),
+        borderStrokeWidth: 2.5,
+        label: 'Marine Protected Area',
+        labelStyle: const TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          color: Color(0xFF63399A),
+        ),
+      ),
+
+      Polygon(
+        points: sensitiveZone,
+        color: const Color(0xFFE9C84A).withValues(alpha: .22),
+        borderColor: const Color(0xFFD0AA18),
+        borderStrokeWidth: 2.5,
+        label: 'Ecologically Sensitive Zone',
+        labelStyle: const TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          color: Color(0xFF806A08),
+        ),
+      ),
+    ];
+  }
+
+  List<Polyline> get maritimeBoundaryLayer {
+    final p = geofenceAnchor ?? currentLocation;
+
+    return [
+      Polyline(
+        points: [
+          LatLng(p.latitude - 0.12, p.longitude - 0.10),
+          LatLng(p.latitude - 0.02, p.longitude - 0.04),
+          LatLng(p.latitude + 0.08, p.longitude - 0.015),
+          LatLng(p.latitude + 0.16, p.longitude + 0.015),
+        ],
+        color: const Color(0xFFD84A45),
+        strokeWidth: 3,
+      ),
+    ];
+  }
+
   // ============================================================
   // RISK ZONES
   // ============================================================
@@ -1199,6 +1379,14 @@ class _ExplorePageState extends State<ExplorePage> {
               if (showChlorophyll) CircleLayer(circles: chlorophyllLayer),
 
               if (showSST) CircleLayer(circles: sstLayer),
+
+              // ==================================================
+              // GEO-FENCE INTELLIGENCE
+              // ==================================================
+              if (showGeofences) PolygonLayer(polygons: geofencePolygons),
+
+              if (showGeofences)
+                PolylineLayer(polylines: maritimeBoundaryLayer),
 
               if (showRisk) CircleLayer(circles: riskZones),
 
@@ -1343,7 +1531,15 @@ class _ExplorePageState extends State<ExplorePage> {
           // ======================================================
           // BOTTOM PANEL
           // ======================================================
-          Positioned(left: 16, right: 16, bottom: 18, child: _bottomPanel()),
+          Positioned(
+            left: 16,
+            right: 16,
+            bottom: 18,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [if (showGeofences) _geofenceWarning(), _bottomPanel()],
+            ),
+          ),
         ],
       ),
     );
@@ -1462,7 +1658,16 @@ class _ExplorePageState extends State<ExplorePage> {
               showSST = value;
             });
           }),
-
+          _layerSwitch(
+            'Geofence intelligence',
+            Icons.gps_fixed_rounded,
+            showGeofences,
+            (value) {
+              setState(() {
+                showGeofences = value;
+              });
+            },
+          ),
           _layerSwitch('Risk zones', Icons.warning_amber_rounded, showRisk, (
             value,
           ) {
@@ -1539,6 +1744,118 @@ class _ExplorePageState extends State<ExplorePage> {
   // ============================================================
   // BOTTOM PANEL
   // ============================================================
+  Widget _geofenceWarning() {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        width: 300,
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFFF4E8),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFFF0B36B), width: 1),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: .08),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 30,
+                  height: 30,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFFFE0BD),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.warning_amber_rounded,
+                    color: Color(0xFFC56A20),
+                    size: 17,
+                  ),
+                ),
+                const SizedBox(width: 8),
+
+                const Expanded(
+                  child: Text(
+                    'GEOFENCE WARNING',
+                    style: TextStyle(
+                      fontSize: 9,
+                      letterSpacing: 1.1,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF9A531D),
+                    ),
+                  ),
+                ),
+
+                Text(
+                  '${geofenceDistanceKm.toStringAsFixed(1)} km',
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF9A531D),
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 7),
+
+            const Text(
+              'RESTRICTED FISHING ZONE',
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w800,
+                letterSpacing: .5,
+                color: Color(0xFF7B481F),
+              ),
+            ),
+
+            const SizedBox(height: 3),
+
+            Text(
+              'You may enter this zone in '
+              '${geofenceEtaMinutes.toStringAsFixed(0)} minutes '
+              'if you continue on your current heading.',
+              style: const TextStyle(
+                fontSize: 10,
+                height: 1.3,
+                color: Color(0xFF6F5848),
+              ),
+            ),
+
+            const SizedBox(height: 6),
+
+            Row(
+              children: [
+                const Icon(
+                  Icons.navigation_rounded,
+                  size: 13,
+                  color: Color(0xFFC56A20),
+                ),
+                const SizedBox(width: 5),
+                Text(
+                  'Heading ${geofenceHeading.toStringAsFixed(0)}°',
+                  style: const TextStyle(
+                    fontSize: 9,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF9A531D),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   Widget _bottomPanel() {
     return Container(

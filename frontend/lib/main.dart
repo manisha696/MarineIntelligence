@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
-
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:frontend/login_page.dart';
@@ -10,6 +9,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
 import 'explore_page.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 void main() {
   runApp(const MarineIntelligenceApp());
@@ -308,6 +308,14 @@ class _MarineHomeState extends State<MarineHome>
   int selectedSeaAction = 0;
 
   StreamSubscription<Position>? positionSubscription;
+  // ignore: unused_element
+  Future<void> _openAssistant() async {
+    final uri = Uri.parse('https://orca-chatbot-frontend.onrender.com/');
+
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, webOnlyWindowName: '_self');
+    }
+  }
 
   final List<String> seaActions = [
     'Tomorrow',
@@ -315,7 +323,6 @@ class _MarineHomeState extends State<MarineHome>
     'Safe route',
     'Sea safety',
   ];
-
   @override
   void initState() {
     super.initState();
@@ -1146,11 +1153,13 @@ class _MarineHomeState extends State<MarineHome>
       context: context,
       barrierDismissible: false,
       barrierLabel: 'Emergency SOS',
-      barrierColor: Colors.black.withOpacity(0.72),
+      barrierColor: Colors.black.withValues(alpha: 0.72),
       transitionDuration: const Duration(milliseconds: 350),
+      // ignore: unnecessary_underscores
       pageBuilder: (_, __, ___) {
         return _SOSDemoOverlay(contactName: displayContact);
       },
+      // ignore: unnecessary_underscores
       transitionBuilder: (_, animation, __, child) {
         return ScaleTransition(
           scale: CurvedAnimation(parent: animation, curve: Curves.easeOutBack),
@@ -1833,11 +1842,7 @@ class _MarineHomeState extends State<MarineHome>
           Expanded(
             child: Center(
               child: GestureDetector(
-                onTap: () {
-                  setState(() {
-                    selectedNavigation = 2;
-                  });
-                },
+                onTap: _openAssistant,
                 child: Container(
                   width: 50,
                   height: 50,
@@ -2421,6 +2426,7 @@ class _SOSDemoOverlayState extends State<_SOSDemoOverlay> {
             border: Border.all(color: const Color(0xFFE05A5A), width: 1.5),
             boxShadow: [
               BoxShadow(
+                // ignore: deprecated_member_use
                 color: Colors.red.withOpacity(0.25),
                 blurRadius: 35,
                 spreadRadius: 5,
@@ -2477,7 +2483,7 @@ class _SOSDemoOverlayState extends State<_SOSDemoOverlay> {
                   boxShadow: [
                     BoxShadow(
                       color: (stage >= 3 ? Colors.green : Colors.red)
-                          .withOpacity(0.35),
+                          .withValues(alpha: 0.35),
                       blurRadius: 30,
                       spreadRadius: 5,
                     ),
