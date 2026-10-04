@@ -33,7 +33,7 @@ class MarineIntelligenceApp extends StatelessWidget {
         fontFamily: 'sans-serif',
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF285B5B)),
       ),
-      home: const LoginPage(nextPage: MarineHome()),
+      home: const LoginPage(nextPage: MarineHome(userName: 'Guest')),
     );
   }
 }
@@ -279,7 +279,9 @@ class RiskEngine {
 // ============================================================================
 
 class MarineHome extends StatefulWidget {
-  const MarineHome({super.key});
+  final String userName;
+
+  const MarineHome({super.key, required this.userName});
 
   @override
   State<MarineHome> createState() => _MarineHomeState();
@@ -329,6 +331,19 @@ class _MarineHomeState extends State<MarineHome>
     super.dispose();
   }
 
+  String _getGreeting() {
+    final hour = DateTime.now().hour;
+
+    if (hour >= 5 && hour < 12) {
+      return 'GOOD MORNING';
+    } else if (hour >= 12 && hour < 17) {
+      return 'GOOD AFTERNOON';
+    } else if (hour >= 17 && hour < 21) {
+      return 'GOOD EVENING';
+    } else {
+      return 'GOOD NIGHT';
+    }
+  }
   // ==========================================================================
   // LOAD LIVE DATA
   // ==========================================================================
@@ -429,12 +444,12 @@ class _MarineHomeState extends State<MarineHome>
       padding: const EdgeInsets.fromLTRB(22, 18, 22, 12),
       child: Row(
         children: [
-          const Expanded(
+          Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'GOOD EVENING',
+                  _getGreeting(),
                   style: TextStyle(
                     fontSize: 10,
                     letterSpacing: 2.2,
@@ -444,7 +459,7 @@ class _MarineHomeState extends State<MarineHome>
                 ),
                 SizedBox(height: 5),
                 Text(
-                  'Manisha',
+                  widget.userName,
                   style: TextStyle(
                     fontSize: 28,
                     fontWeight: FontWeight.w700,

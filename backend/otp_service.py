@@ -1,11 +1,9 @@
 import os
 import base64
+import importlib
 from email.message import EmailMessage
 
 from dotenv import load_dotenv
-
-from google.oauth2.credentials import Credentials
-from googleapiclient.discovery import build
 
 
 load_dotenv()
@@ -22,6 +20,19 @@ def generate_otp() -> str:
 
 
 def send_otp_email(recipient_email: str, otp: str):
+
+    try:
+        Credentials = importlib.import_module(
+            "google.oauth2.credentials"
+        ).Credentials
+        build = importlib.import_module(
+            "googleapiclient.discovery"
+        ).build
+    except ImportError as exc:
+        raise RuntimeError(
+            "Google API dependencies are not installed. Install "
+            "google-auth and google-api-python-client."
+        ) from exc
 
     if not GMAIL_CLIENT_ID:
         raise RuntimeError("GMAIL_CLIENT_ID is not configured")

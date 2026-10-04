@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'marine_profile_page.dart';
 
 class OTPPage extends StatefulWidget {
   final String name;
@@ -87,15 +88,28 @@ class _OTPPageState extends State<OTPPage> {
 
       if (registerResponse.statusCode >= 200 &&
           registerResponse.statusCode < 300) {
+        final token = registerData['access_token'];
+
+        if (token == null) {
+          showMessage(
+            'Account created, but authentication token was not received.',
+          );
+          return;
+        }
         if (!mounted) return;
 
-        showMessage('Account created successfully. Please login.');
-
-        await Future.delayed(const Duration(milliseconds: 700));
-
         if (!mounted) return;
 
-        Navigator.popUntil(context, (route) => route.isFirst);
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => MarineProfilePage(
+              name: widget.name,
+              email: widget.email,
+              token: token,
+            ),
+          ),
+        );
       } else {
         final message =
             registerData['detail'] ??
