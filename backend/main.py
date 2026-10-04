@@ -241,30 +241,21 @@ def verify_registration_otp(
         "message": "Email verified successfully",
         "email": otp_request.email
     }
+
 @app.post("/register")
 def register(
     user_data: RegisterRequest,
     db: Session = Depends(get_db)
 ):
-
-    # ----------------------------------------------
-    # CHECK IF EMAIL IS ALREADY REGISTERED
-    # ----------------------------------------------
-
     existing_user = db.query(User).filter(
         User.email == user_data.email
     ).first()
 
     if existing_user:
-
         raise HTTPException(
             status_code=400,
             detail="Email already registered"
         )
-
-    # ----------------------------------------------
-    # CHECK EMAIL OTP VERIFICATION
-    # ----------------------------------------------
 
     verified_otp = db.query(
         OTPVerification
@@ -277,23 +268,14 @@ def register(
     ).first()
 
     if not verified_otp:
-
         raise HTTPException(
             status_code=400,
             detail="Please verify your email with OTP before registration"
         )
 
-    # ----------------------------------------------
-    # HASH PASSWORD
-    # ----------------------------------------------
-
     hashed_password = hash_password(
         user_data.password
     )
-
-    # ----------------------------------------------
-    # CREATE USER
-    # ----------------------------------------------
 
     new_user = User(
         name=user_data.name,
@@ -302,14 +284,8 @@ def register(
     )
 
     db.add(new_user)
-
     db.commit()
-
     db.refresh(new_user)
-
-    # ----------------------------------------------
-    # RETURN RESPONSE
-    # ----------------------------------------------
 
     return {
         "message": "User registered successfully",
@@ -317,6 +293,7 @@ def register(
         "name": new_user.name,
         "email": new_user.email
     }
+
 # ==================================================
 # LOGIN
 # ==================================================
