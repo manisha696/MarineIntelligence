@@ -1,50 +1,36 @@
 import os
-import random
-import smtplib
+import requests
 
-from email.message import EmailMessage
 from dotenv import load_dotenv
-
-
-# ==================================================
-# LOAD ENVIRONMENT VARIABLES
-# ==================================================
 
 load_dotenv()
 
+RESEND_API_KEY = os.getenv("RESEND_API_KEY")
+RESEND_URL = "https://api.resend.com/emails"
 
-SMTP_HOST = os.getenv("SMTP_HOST")
-SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
-SMTP_USERNAME = os.getenv("SMTP_USERNAME")
-SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
-SMTP_FROM = os.getenv("SMTP_FROM")
+# Use the sender address available in your Resend account.
+# For initial testing, Resend may provide an onboarding sender.
+RESEND_FROM = os.getenv(
+    "RESEND_FROM",
+    "Marine Intelligence <onboarding@resend.dev>"
+)
 
-
-# ==================================================
-# GENERATE OTP
-# ==================================================
 
 def generate_otp() -> str:
+    import random
+
     return str(random.randint(100000, 999999))
 
 
-# ==================================================
-# SEND OTP EMAIL
-# ==================================================
+def send_otp_email(recipient_email: str, otp: str):
+    if not RESEND_API_KEY:
+        raise RuntimeError("RESEND_API_KEY is not configured")
 
-def send_otp_email(
-    recipient_email: str,
-    otp: str
-):
-
-    message = EmailMessage()
-
-    message["Subject"] = "Marine Intelligence - Email Verification OTP"
-    message["From"] = SMTP_FROM
-    message["To"] = recipient_email
-
-    message.set_content(
-        f"""
+    payload = {
+        "from": RESEND_FROM,
+        "to": [recipient_email],
+        "subject": "Marine Intelligence - Email Verification OTP",
+        "text": f"""
 Marine Intelligence
 
 Your email verification OTP is:
@@ -58,18 +44,19 @@ If you did not request this verification, please ignore this email.
 Regards,
 Marine Intelligence Team
 """
+    }
+
+    response = requests.post(
+        RESEND_URL,
+        headers={
+            "Authorization": f"Bearer {RESEND_API_KEY}",
+            "Content-Type": "application/json"
+        },
+        json=payload,
+        timeout=20
     )
 
-    with smtplib.SMTP(
-        SMTP_HOST,
-        SMTP_PORT
-    ) as server:
-
-        server.starttls()
-
-        server.login(
-            SMTP_USERNAME,
-            SMTP_PASSWORD
+    if response.status_code >= 400:
+        raise RuntimeError(
+            f"Resend API error {response.status_code}: {response.text}"
         )
-
-        server.send_message(message)
