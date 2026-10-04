@@ -286,12 +286,27 @@ def register(
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
+    
+    token_data = {
+    "sub": str(new_user.id),
+    "email": new_user.email,
+    "exp": datetime.utcnow()
+    + timedelta(hours=24)
+    }
+
+    access_token = jwt.encode(
+    token_data,
+    SECRET_KEY,
+    algorithm=ALGORITHM
+    )
 
     return {
-        "message": "User registered successfully",
-        "user_id": new_user.id,
-        "name": new_user.name,
-        "email": new_user.email
+    "message": "User registered successfully",
+    "user_id": new_user.id,
+    "name": new_user.name,
+    "email": new_user.email,
+    "access_token": access_token,
+    "token_type": "bearer"
     }
 
 # ==================================================
@@ -467,6 +482,19 @@ def create_profile(
             profile_data.preferred_language
         ),
 
+        # SOS emergency contact
+        family_contact_name=(
+            profile_data.family_contact_name
+        ),
+
+        family_contact_number=(
+            profile_data.family_contact_number
+        ),
+
+        relationship=(
+            profile_data.relationship
+        ),
+
         latitude=profile_data.latitude,
 
         longitude=profile_data.longitude,
@@ -475,7 +503,6 @@ def create_profile(
 
         boat_type=profile_data.boat_type
     )
-
     db.add(profile)
 
     db.commit()
@@ -558,6 +585,18 @@ def update_profile(
 
     profile.preferred_language = (
         profile_data.preferred_language
+    )
+        # SOS emergency contact
+    profile.family_contact_name = (
+        profile_data.family_contact_name
+    )
+
+    profile.family_contact_number = (
+        profile_data.family_contact_number
+    )
+
+    profile.relationship = (
+        profile_data.relationship
     )
 
     profile.latitude = (
