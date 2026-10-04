@@ -1,5 +1,5 @@
 from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship as orm_relationship
 from datetime import datetime
 
 from database import Base
@@ -36,7 +36,7 @@ class User(Base):
     )
 
     # Marine profile
-    marine_profile = relationship(
+    marine_profile = orm_relationship(
         "MarineProfile",
         back_populates="user",
         uselist=False,
@@ -111,7 +111,7 @@ class MarineProfile(Base):
         nullable=True
     )
 
-    user = relationship(
+    user = orm_relationship(
         "User",
         back_populates="marine_profile"
     )
