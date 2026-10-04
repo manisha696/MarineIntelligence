@@ -42,11 +42,6 @@ class User(Base):
         uselist=False,
         cascade="all, delete-orphan"
     )
-    # Emergency contact
-    family_contact_name = Column(String, nullable=True)
-    family_contact_number = Column(String, nullable=True)
-    relationship = Column(String, nullable=True)
-
 
 
 # ==================================================
@@ -78,6 +73,22 @@ class MarineProfile(Base):
         String,
         default="English",
         nullable=False
+    )
+
+    # Emergency contact
+    family_contact_name = Column(
+        String,
+        nullable=True
+    )
+
+    family_contact_number = Column(
+        String,
+        nullable=True
+    )
+
+    relationship = Column(
+        String,
+        nullable=True
     )
 
     latitude = Column(
@@ -150,4 +161,3 @@ class OTPVerification(Base):
         DateTime,
         default=datetime.utcnow
     )
-    
