@@ -9,7 +9,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
 import 'explore_page.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:web/web.dart' as web;
 
 void main() {
   runApp(const MarineIntelligenceApp());
@@ -308,11 +308,8 @@ class _MarineHomeState extends State<MarineHome>
   int selectedSeaAction = 0;
 
   StreamSubscription<Position>? positionSubscription;
-  // ignore: unused_element
   Future<void> _openAssistant() async {
-    final uri = Uri.parse('https://orca-chatbot-frontend.onrender.com/');
-
-    await launchUrl(uri, webOnlyWindowName: '_blank');
+    web.window.open('https://orca-chatbot-frontend.onrender.com/', '_blank');
   }
 
   final List<String> seaActions = [
