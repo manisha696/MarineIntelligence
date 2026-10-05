@@ -312,9 +312,7 @@ class _MarineHomeState extends State<MarineHome>
   Future<void> _openAssistant() async {
     final uri = Uri.parse('https://orca-chatbot-frontend.onrender.com/');
 
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, webOnlyWindowName: '_self');
-    }
+    await launchUrl(uri, webOnlyWindowName: '_blank');
   }
 
   final List<String> seaActions = [
